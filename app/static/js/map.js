@@ -20,8 +20,13 @@ document.addEventListener('DOMContentLoaded', async function () {
         markers.addLayer(marker);
         });
         
-        map.addLayer(markers);
     });
+
+
+    L.control.layers(null, {
+        "Clustered EV-Markers": markers,
+    }).addTo(map);
+
 
     var marker;
     var circle;
