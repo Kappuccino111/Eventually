@@ -15,29 +15,14 @@ document.addEventListener('DOMContentLoaded', async function () {
         data.features.forEach(feature => {
         const [lon, lat] = feature.geometry.coordinates;
         const marker = L.marker([lat, lon]);
-        
-        // Optional: Add popup with feature properties
-        // marker.bindPopup(JSON.stringify(feature.properties));
+    
         
         markers.addLayer(marker);
         });
         
-        // Add cluster group to map
         map.addLayer(markers);
     });
 
-
-    // await fetch('/static/assets/elektrotankstellen_wgs84.geojson')
-    // .then(response => response.json())
-    // .then(data => {
-    //     evStations = data
-    //     L.geoJSON(data).addTo(map);
-    // })
-    // .catch(error => console.error('Error loading GeoJSON:', error));
-
-    // evStations.features.forEach((e) => {
-    //     L.marker([e['geometry'].coordinates[0], e['geometry'].coordinates[1]]).addTo(map)
-    // })
     var marker;
     var circle;
 
