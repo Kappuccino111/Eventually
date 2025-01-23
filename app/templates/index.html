@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+
+<!-- Centered title -->
+<h1 id="main-title"> We Don't Have a Name</h1>
+
+<!-- Centered search input and button -->
+<div id="search-container">
+    <input type="text" id="search-input" placeholder="Search for a location in Germany">
+    <button id="search-button">Search</button>
+</div>
+
+<!-- Checkboxes and radius input fields -->
+<div id="checkboxes-container">
+    <div class="checkbox-item">
+        <input type="checkbox" id="initial_points" />
+        <label for="initial_points">Check</label>
+    </div>
+</div>
+
+<div id="radius-container">
+    <label for="radius-input">Radius (km): </label>
+    <input type="number" id="radius-input" value="20" min="1" max="100" />
+</div>
+
+<div id="map"></div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/map.js') }}"></script>
+{% endblock %}
