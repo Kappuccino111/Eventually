@@ -269,6 +269,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 const avgGHI = data.solar_data.avg_ghi.toFixed(2);
                 const avgDNI = data.solar_data.avg_dni.toFixed(2);
 
+                const totalAvg = (parseFloat(avgWind10m) + parseFloat(avgWind50m) + parseFloat(avgGHI) + parseFloat(avgDNI)) / 4;
+
                 // Generate the table content
                 let tableHtml = `
                 <table style="border-collapse: collapse; width: 100%; text-align: center;">
@@ -305,9 +307,14 @@ document.addEventListener('DOMContentLoaded', function () {
                         <td style="border: 1px solid #ddd; padding: 8px;">${avgGHI} kWh/m²</td>
                         <td style="border: 1px solid #ddd; padding: 8px;">${avgDNI} kWh/m²</td>
                     </tr>
+                    <tr style="font-weight: bold;">
+                        <td style="border: 1px solid #ddd; padding: 8px;">Total Average</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;" colspan="4">${totalAvg.toFixed(2)} kWh/m²</td>
+                    </tr>
                     </tbody>
                 </table>
             `;
+
 
                 // Update the popup with the table
                 loadingPopup.setContent(`
