@@ -24,6 +24,11 @@
         <label for="filtered_points">Filtered Points</label>
     </div>
 
+    <div class="checkbox-item">
+        <input type="checkbox" id="hull_points" />
+        <label for="hull_points">CHM</label>
+    </div>
+
 </div>
 
 <div id="radius-container">
@@ -36,5 +41,6 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 <script src="{{ url_for('static', filename='js/map.js') }}"></script>
 {% endblock %}
