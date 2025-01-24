@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+cache/
+tests/
+docs/
+*.log
+presentation/
