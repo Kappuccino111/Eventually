@@ -1,19 +1,14 @@
 from flask import Blueprint, render_template, jsonify, request
 from fetch_wind_data import fetch_and_return_wind_data
 from fetch_solar_data import fetch_and_return_solar_data
-from model.predictive_model import (
-    init,
-    get_area_data,
-    haversine_distances,
-    calculate_transit_density,
-    identify_low_transit_areas,
-    optimize_locations
-)
+from model.predictive_model import *
 import pandas as pd
 import networkx as nx
 from shapely.geometry import Point
 import numpy as np
 from app import cache  # Import the cache object from __init__.py
+import numpy as np
+from scipy.spatial import cKDTree
 
 main = Blueprint('main', __name__)
 
@@ -154,6 +149,73 @@ def complete_model_results():
             "road_heatmap": road_heat_data,     # [ {coords: [[lat, lon], [lat, lon]], score: 0.XX}, ... ]
             "center": CENTER,                   # (lat, lon)
             "radius": RADIUS
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@main.route("/api/complete-model-results-v3", methods=["GET"])
+def complete_model_results_v3():
+    lat = float(request.args.get("latitude", 52.519595266877936))
+    lon = float(request.args.get("longitude", 13.406919626977658))
+    radius = float(request.args.get("radius", 15))
+
+    infra_val = float(request.args.get("infra", 0.25))
+    solar_val = float(request.args.get("solar", 0.25))
+    neighborhood_val = float(request.args.get("neighborhood", 0.25))
+    traffic_val = float(request.args.get("traffic", 0.25))
+
+    try:
+        # 1) init + fetch data
+        init(lat, lon, radius)
+        networks, existing_stations = get_area_data()
+        grid, density_scores = calculate_transit_density(networks, existing_stations)
+
+        # 2) land use + combined density
+        land_use = get_land_use()
+        weights = {
+            'infrastructure': infra_val,
+            'solar': solar_val,
+            'neighborhood': neighborhood_val,
+            'traffic': traffic_val
+        }
+        total_density = calculate_combined_density(
+            grid=grid,
+            land_use=land_use,
+            networks=networks,
+            solar_data=None,
+            traffic_data=None,
+            weights=weights
+        )
+
+        # 3) Build "road_heatmap_v3" data by sampling each secondary road segment
+        #    just like create_road_heatmap_v3 does, but store it in JSON form.
+        mask = haversine_distances(grid, np.array([[lat, lon]])).ravel() <= radius
+        grid_masked = grid[mask]
+        tree = cKDTree(grid_masked)
+
+        secondary_edges = preprocess_road_network(networks['drive'])
+        road_heatmap_v3 = []
+        for u_coords, v_coords in secondary_edges:
+            # sample points along the edge
+            points = np.linspace([u_coords[0], u_coords[1]],
+                                 [v_coords[0], v_coords[1]],
+                                 num=10)
+            _, indices = tree.query(points)
+            score = float(np.mean(total_density[indices]))
+            # We'll store 0..1 in "score"
+            # The front-end can do color = #??
+            road_heatmap_v3.append({
+                "coords": [
+                    [u_coords[0], u_coords[1]],
+                    [v_coords[0], v_coords[1]]
+                ],
+                "score": score
+            })
+
+        # 4) Return as JSON
+        return jsonify({
+            "road_heatmap_v3": road_heatmap_v3
         })
 
     except Exception as e:

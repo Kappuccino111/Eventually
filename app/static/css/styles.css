@@ -5,6 +5,17 @@ body {
     font-family: 'Roboto', sans-serif;
 }
 
+#slider-container {
+    display: flex;
+    width: 100%;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-top: 20px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
 /* Center and style the main title */
 #main-title {
     text-align: center;

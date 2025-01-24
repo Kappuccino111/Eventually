@@ -20,6 +20,124 @@ document.addEventListener('DOMContentLoaded', async function () {
         "opacity": 0.65
     };
 
+    var slider1Input = document.getElementById('slider1');
+    var slider2Input = document.getElementById('slider2');
+    var slider3Input = document.getElementById('slider3');
+    var slider4Input = document.getElementById('slider4');
+
+
+    var slider1Val = 0.25
+    var slider2Val = 0.25
+    var slider3Val = 0.25
+    var slider4Val = 0.25
+
+    function updateSliders() {
+        const total = slider1Val + slider2Val + slider3Val + slider4Val;
+
+        // Adjust sliders to make sure the sum is 1
+        if (total !== 1) {
+            const diff = 1 - total;
+
+            slider1Val += diff * (slider1Val / total);
+            slider2Val += diff * (slider2Val / total);
+            slider3Val += diff * (slider3Val / total);
+            slider4Val += diff * (slider4Val / total);
+
+            slider1Input.value = slider1Val.toFixed(2);
+            slider2Input.value = slider2Val.toFixed(2);
+            slider3Input.value = slider3Val.toFixed(2);
+            slider4Input.value = slider4Val.toFixed(2);
+        }
+    }
+
+    slider1Input.addEventListener('input', function () {
+        slider1Val = parseFloat(slider1Input.value)
+        updateSliders()
+    })
+
+    slider2Input.addEventListener('input', function () {
+        slider2Val = parseFloat(slider2Input.value)
+        updateSliders()
+    })
+
+    slider3Input.addEventListener('input', function () {
+        slider3Val = parseFloat(slider3Input.value)
+        updateSliders()
+    })
+
+    slider4Input.addEventListener('input', function () {
+        slider4Val = parseFloat(slider4Input.value)
+        updateSliders()
+        console.log("slider4Val", slider4Val);
+    })
+
+
+    let roadHeatmapV3Layer = L.layerGroup([]);
+
+    // b) Get the checkbox and set up a listener
+    const roadHeatmapV3Checkbox = document.getElementById('road_heatmap_v3_checkbox');
+    roadHeatmapV3Checkbox.addEventListener('change', function () {
+        if (this.checked) {
+            map.addLayer(roadHeatmapV3Layer);
+        } else {
+            map.removeLayer(roadHeatmapV3Layer);
+        }
+    });
+
+    // c) We'll store the “finetuned” road lines data in memory
+    let roadHeatmapV3Data = [];
+    function fetchCompleteModelResultsV3(lat, lon, radiusKm) {
+
+        const infraVal = parseFloat(slider1Input.value);
+        const solarVal = parseFloat(slider2Input.value);
+        const neighborhoodVal = parseFloat(slider3Input.value);
+        const trafficVal = parseFloat(slider4Input.value);
+
+        // 2) Build a query string
+        // example: /api/complete-model-results-v3?latitude=...&longitude=...&radius=...&infra=0.2&solar=0.3&neighbor=0.3&traffic=0.2
+        const url = `/api/complete-model-results-v3?latitude=${lat}&longitude=${lon}&radius=${radiusKm}`
+            + `&infra=${infraVal}&solar=${solarVal}&neighborhood=${neighborhoodVal}&traffic=${trafficVal}`;
+
+        console.log("Fetching V3 data from", url);
+
+
+        console.log("Fetching V3 data from", url);
+        fetch(url)
+            .then(resp => resp.json())
+            .then(data => {
+                if (data.error) {
+                    console.error("V3 error:", data.error);
+                    return;
+                }
+                // data.road_heatmap_v3 is array of { coords: [[lat,lon],[lat2,lon2]], score: 0..1 }
+                buildRoadHeatmapV3Layer(data.road_heatmap_v3);
+                // If user already had the checkbox checked, show it
+                if (roadHeatmapV3Checkbox.checked) {
+                    map.addLayer(roadHeatmapV3Layer);
+                }
+            })
+            .catch(err => console.error("V3 fetch error:", err));
+    }
+
+    function buildRoadHeatmapV3Layer(roadLines) {
+        roadHeatmapV3Layer.clearLayers();
+        roadLines.forEach(line => {
+            let coords = line.coords;   // [[lat1, lon1], [lat2, lon2]]
+            let score = line.score;     // 0..1
+            // color from red(high) to blue(low) is: #RRGGBB
+            // example: red=score, blue=1-score
+            // let's replicate your code: color = f'#{int(255*score):02x}00{int(255*(1-score)):02x}'
+            let r = Math.round(255 * score);
+            let g = 0;
+            let b = Math.round(255 * (1 - score));
+            let color = `rgb(${r},${g},${b})`;
+
+            let poly = L.polyline(coords, { color, weight: 3 });
+            roadHeatmapV3Layer.addLayer(poly);
+        });
+    }
+
+
     // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_cgn/{z}/{x}/{y}.pbf', {
     //     rendererFactory: L.canvas.tile,
     //     vectorTileLayerStyles: {
@@ -309,6 +427,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
         let radiusKm = parseInt(radiusInput.value) || 20;
         fetchCompleteModelResults(lat, lon, radiusKm);
+        fetchCompleteModelResultsV3(lat, lon, radiusKm);
     }
 
     // ----------------------------------
@@ -1026,7 +1145,8 @@ document.addEventListener('DOMContentLoaded', async function () {
                 radius: 3,
                 color: 'blue',
                 fillColor: 'blue',
-                fillOpacity: 0.9
+                fillOpacity: 0.3,
+                borderOpacity: 0.3,
             }).bindPopup('Existing Station');
             existingStationsLayer.addLayer(marker);
         });
