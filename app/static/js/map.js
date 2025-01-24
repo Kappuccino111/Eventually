@@ -427,7 +427,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
         let radiusKm = parseInt(radiusInput.value) || 20;
         fetchCompleteModelResults(lat, lon, radiusKm);
-        fetchCompleteModelResultsV3(lat, lon, radiusKm);
+        // fetchCompleteModelResultsV3(lat, lon, radiusKm);
     }
 
     // ----------------------------------
