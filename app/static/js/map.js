@@ -616,6 +616,25 @@ document.addEventListener('DOMContentLoaded', function () {
         return turf.convex(pointsFC);
     }
 
+    function fetchModelResults(lat, lon, radiusKm) {
+        // 1) build URL
+        let url = `/api/model-results?latitude=${lat}&longitude=${lon}&radius=${radiusKm}`;
+
+        fetch(url)
+            .then((resp) => resp.json())
+            .then((data) => {
+                if (data.error) {
+                    console.error("Model error:", data.error);
+                    return;
+                }
+                // data = { low_transit_centers: [...], proposed_locations: [...] }
+                addModelMarkers(data.low_transit_centers, data.proposed_locations);
+            })
+            .catch((err) => {
+                console.error("Network error or JSON parse error:", err);
+            });
+    }
+
     // ----------------------------------
     // 14) SHOW / HIDE DYNAMIC POINTS
     // ----------------------------------
