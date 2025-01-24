@@ -1,6 +1,13 @@
 from flask import Blueprint, render_template, jsonify, request
 from fetch_wind_data import fetch_and_return_wind_data
 from fetch_solar_data import fetch_and_return_solar_data
+from model.predictive_model import (
+    init,
+    get_area_data,
+    calculate_transit_density,
+    identify_low_transit_areas,
+    optimize_locations
+)
 from app import cache  # Import the cache object from __init__.py
 
 main = Blueprint('main', __name__)
@@ -33,6 +40,32 @@ def get_wind_solar_data():
         data = fetch_cached_data(latitude, longitude)
         return jsonify(data)
 
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@main.route("/api/model-results", methods=["GET"])
+def model_results():
+    # 1) parse lat/lon/radius from query params
+    lat = request.args.get('latitude', type=float)
+    lon = request.args.get('longitude', type=float)
+    radius = request.args.get('radius', type=float)
+
+    if lat is None or lon is None or radius is None:
+        return jsonify({"error": "latitude, longitude, and radius are required"}), 400
+
+    try:
+        # 2) run the pipeline
+        init(lat, lon, radius)
+        networks, existing_stations = get_area_data()
+        grid, density_scores = calculate_transit_density(networks, existing_stations)
+        low_transit_centers = identify_low_transit_areas(grid, density_scores)
+        proposed_locations = optimize_locations(low_transit_centers, existing_stations, networks)
+
+        # 3) Return as JSON (list of [lat, lon] pairs, for example)
+        return jsonify({
+            "low_transit_centers": low_transit_centers,
+            "proposed_locations": proposed_locations
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
