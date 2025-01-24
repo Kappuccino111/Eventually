@@ -32,8 +32,8 @@ document.addEventListener('DOMContentLoaded', async function () {
     // vectorTileLayerStyles: {
     //     roads: { color: 'blue', weight: 2 }
     // }
-    // }).addTo(map); 
-    
+    // }).addTo(map);
+
     // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_ddorf/{z}/{x}/{y}.pbf', {
     // rendererFactory: L.canvas.tile,
     // vectorTileLayerStyles: {
@@ -53,8 +53,8 @@ document.addEventListener('DOMContentLoaded', async function () {
     // vectorTileLayerStyles: {
     //     roads: { color: 'blue', weight: 2 }
     // }
-    // }).addTo(map); 
-    
+    // }).addTo(map);
+
     // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_ddorf/{z}/{x}/{y}.pbf', {
     // rendererFactory: L.canvas.tile,
     // vectorTileLayerStyles: {
@@ -74,8 +74,8 @@ document.addEventListener('DOMContentLoaded', async function () {
     // vectorTileLayerStyles: {
     //     roads: { color: 'blue', weight: 2 }
     // }
-    // }).addTo(map); 
-    
+    // }).addTo(map);
+
     // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_ddorf/{z}/{x}/{y}.pbf', {
     // rendererFactory: L.canvas.tile,
     // vectorTileLayerStyles: {
@@ -95,8 +95,8 @@ document.addEventListener('DOMContentLoaded', async function () {
     // vectorTileLayerStyles: {
     //     roads: { color: 'blue', weight: 2 }
     // }
-    // }).addTo(map); 
-    
+    // }).addTo(map);
+
     // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_ddorf/{z}/{x}/{y}.pbf', {
     // rendererFactory: L.canvas.tile,
     // vectorTileLayerStyles: {
@@ -109,6 +109,31 @@ document.addEventListener('DOMContentLoaded', async function () {
         "Clustered EV-Markers": markers,
     }).addTo(map);
 
+    let transportLayer = L.layerGroup([]);
+    let existingStationsLayer = L.layerGroup([]);
+    let lowTransitLayer = L.layerGroup([]);
+    let proposedLayer = L.layerGroup([]);
+    let roadHeatmapLayer = L.layerGroup([]);
+
+    const transportCheckbox = document.getElementById('transport_checkbox');
+    const existingCheckbox = document.getElementById('existing_checkbox');
+    const lowTransitCheckbox = document.getElementById('low_transit_checkbox');
+    const proposedCheckbox = document.getElementById('proposed_checkbox');
+    const roadHeatmapCheckbox = document.getElementById('road_heatmap_checkbox');
+
+    transportCheckbox.addEventListener('change', () => toggleLayer(transportCheckbox, transportLayer));
+    existingCheckbox.addEventListener('change', () => toggleLayer(existingCheckbox, existingStationsLayer));
+    lowTransitCheckbox.addEventListener('change', () => toggleLayer(lowTransitCheckbox, lowTransitLayer));
+    proposedCheckbox.addEventListener('change', () => toggleLayer(proposedCheckbox, proposedLayer));
+    roadHeatmapCheckbox.addEventListener('change', () => toggleLayer(roadHeatmapCheckbox, roadHeatmapLayer));
+
+    function toggleLayer(checkbox, layerGroup) {
+        if (checkbox.checked) {
+            map.addLayer(layerGroup);
+        } else {
+            map.removeLayer(layerGroup);
+        }
+    }
 
     // ----------------------------------
     //  2) DOM ELEMENTS & VARIABLES
@@ -150,7 +175,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     const fetchEVStations = async (south, west, north, east) => {
         const endpoint = "https://overpass-api.de/api/interpreter";
-      
+
         const query = `
           [out:json][timeout:60];
           node["amenity"="charging_station"](${south},${west},${north},${east});
@@ -158,7 +183,7 @@ document.addEventListener('DOMContentLoaded', async function () {
           >;
           out skel qt;
         `;
-      
+
         try {
           const response = await fetch(endpoint, {
             method: "POST",
@@ -167,11 +192,11 @@ document.addEventListener('DOMContentLoaded', async function () {
             },
             body: new URLSearchParams({ data: query }),
           });
-      
+
           if (!response.ok) {
             throw new Error(`HTTP error! Status: ${response.status}`);
           }
-      
+
           const data = await response.json();
           console.log(data); // Log the EV charging station data
           return data
@@ -179,7 +204,7 @@ document.addEventListener('DOMContentLoaded', async function () {
           console.error("Error fetching EV stations:", error);
         }
       };
-      
+
 
     checkboxInitial.addEventListener('change', updateDynamicPoints);
     checkboxFiltered.addEventListener('change', toggleFilteredPoints);
@@ -231,10 +256,10 @@ document.addEventListener('DOMContentLoaded', async function () {
             handleSearchResult(lat, lon, `Latitude: ${lat}, Longitude: ${lon}`);
             let bbox = calculateBoundingBox(lastSearchedLat, lastSearchedLon)
             let stations = await fetchEVStations(bbox.south, bbox.west, bbox.north, bbox.east)
-            
+
             stations.elements.forEach((s) => {
                 const marker = L.marker([s.lat, s.lon]);
-                markers.addLayer(marker)    
+                markers.addLayer(marker)
             })
             markers.addTo(map)
         } else {
@@ -255,10 +280,10 @@ document.addEventListener('DOMContentLoaded', async function () {
 
                         let bbox = calculateBoundingBox(lastSearchedLat, lastSearchedLon)
                         let stations = await fetchEVStations(bbox.south, bbox.west, bbox.north, bbox.east)
-                        
+
                         stations.elements.forEach((s) => {
                             const marker = L.marker([s.lat, s.lon]);
-                            markers.addLayer(marker)    
+                            markers.addLayer(marker)
                         })
                         markers.addTo(map)
                     } else {
@@ -281,6 +306,9 @@ document.addEventListener('DOMContentLoaded', async function () {
 
         // Add circle with dotted lines
         addRadiusCircle(lat, lon);
+
+        let radiusKm = parseInt(radiusInput.value) || 20;
+        fetchCompleteModelResults(lat, lon, radiusKm);
     }
 
     // ----------------------------------
@@ -309,13 +337,13 @@ document.addEventListener('DOMContentLoaded', async function () {
         radiusKm = radiusInput.value
         const EARTH_RADIUS = 6371; // Earth's radius in km
         const radiusRad = radiusKm / EARTH_RADIUS; // Convert radius to radians
-    
+
         const latNorth = lat + (radiusRad * (180 / Math.PI)); // Convert radians to degrees
         const latSouth = lat - (radiusRad * (180 / Math.PI));
-    
+
         const lonEast = lon + (radiusRad * (180 / Math.PI)) / Math.cos(lat * Math.PI / 180);
         const lonWest = lon - (radiusRad * (180 / Math.PI)) / Math.cos(lat * Math.PI / 180);
-    
+
         return {
             north: latNorth,
             south: latSouth,
@@ -330,13 +358,13 @@ document.addEventListener('DOMContentLoaded', async function () {
         radiusKm = radiusInput.value
         const EARTH_RADIUS = 6371; // Earth's radius in km
         const radiusRad = radiusKm / EARTH_RADIUS; // Convert radius to radians
-    
+
         const latNorth = lat + (radiusRad * (180 / Math.PI)); // Convert radians to degrees
         const latSouth = lat - (radiusRad * (180 / Math.PI));
-    
+
         const lonEast = lon + (radiusRad * (180 / Math.PI)) / Math.cos(lat * Math.PI / 180);
         const lonWest = lon - (radiusRad * (180 / Math.PI)) / Math.cos(lat * Math.PI / 180);
-    
+
         return {
             north: latNorth,
             south: latSouth,
@@ -351,13 +379,13 @@ document.addEventListener('DOMContentLoaded', async function () {
         radiusKm = radiusInput.value
         const EARTH_RADIUS = 6371; // Earth's radius in km
         const radiusRad = radiusKm / EARTH_RADIUS; // Convert radius to radians
-    
+
         const latNorth = lat + (radiusRad * (180 / Math.PI)); // Convert radians to degrees
         const latSouth = lat - (radiusRad * (180 / Math.PI));
-    
+
         const lonEast = lon + (radiusRad * (180 / Math.PI)) / Math.cos(lat * Math.PI / 180);
         const lonWest = lon - (radiusRad * (180 / Math.PI)) / Math.cos(lat * Math.PI / 180);
-    
+
         return {
             north: latNorth,
             south: latSouth,
@@ -372,13 +400,13 @@ document.addEventListener('DOMContentLoaded', async function () {
         radiusKm = radiusInput.value
         const EARTH_RADIUS = 6371; // Earth's radius in km
         const radiusRad = radiusKm / EARTH_RADIUS; // Convert radius to radians
-    
+
         const latNorth = lat + (radiusRad * (180 / Math.PI)); // Convert radians to degrees
         const latSouth = lat - (radiusRad * (180 / Math.PI));
-    
+
         const lonEast = lon + (radiusRad * (180 / Math.PI)) / Math.cos(lat * Math.PI / 180);
         const lonWest = lon - (radiusRad * (180 / Math.PI)) / Math.cos(lat * Math.PI / 180);
-    
+
         return {
             north: latNorth,
             south: latSouth,
@@ -939,24 +967,128 @@ document.addEventListener('DOMContentLoaded', async function () {
         return turf.convex(pointsFC);
     }
 
-    function fetchModelResults(lat, lon, radiusKm) {
-        // 1) build URL
-        let url = `/api/model-results?latitude=${lat}&longitude=${lon}&radius=${radiusKm}`;
-
+    function fetchCompleteModelResults(lat, lon, radiusKm) {
+        let url = `/api/complete-model-results?latitude=${lat}&longitude=${lon}&radius=${radiusKm}`;
         fetch(url)
-            .then((resp) => resp.json())
-            .then((data) => {
+            .then(resp => resp.json())
+            .then(data => {
                 if (data.error) {
                     console.error("Model error:", data.error);
                     return;
                 }
-                // data = { low_transit_centers: [...], proposed_locations: [...] }
-                addModelMarkers(data.low_transit_centers, data.proposed_locations);
+                // data has transport_data, existing_stations, etc.
+                buildTransportLayer(data.transport_data);
+                buildExistingStationsLayer(data.existing_stations);
+                buildLowTransitLayer(data.low_transit_centers);
+                buildProposedLayer(data.proposed_locations);
+                buildRoadHeatmapLayer(data.road_heatmap);
+
+                // If any checkboxes are checked, ensure those layers appear
+                if (transportCheckbox.checked) map.addLayer(transportLayer);
+                if (existingCheckbox.checked) map.addLayer(existingStationsLayer);
+                if (lowTransitCheckbox.checked) map.addLayer(lowTransitLayer);
+                if (proposedCheckbox.checked) map.addLayer(proposedLayer);
+                if (roadHeatmapCheckbox.checked) map.addLayer(roadHeatmapLayer);
             })
-            .catch((err) => {
-                console.error("Network error or JSON parse error:", err);
-            });
+            .catch(err => console.error("Network or JSON error:", err));
     }
+
+    function buildTransportLayer(transportData) {
+        // Clear existing
+        transportLayer.clearLayers();
+
+        // transportData = { bus: [[lat, lon], ...], rail: [...], subway: [...], ...}
+        // We can add them all to a single layer group, or separate them if you prefer
+        let colorMap = {
+            "bus": "green",
+            "rail": "red",
+            "subway": "orange"
+        };
+        Object.keys(transportData).forEach(mode => {
+            let coordsList = transportData[mode]; // e.g. [[lat, lon], ...]
+            let color = colorMap[mode] || "gray";
+            coordsList.forEach(([lat, lon]) => {
+                let marker = L.circleMarker([lat, lon], {
+                    radius: 3,
+                    color: color,
+                    fillColor: color,
+                    fillOpacity: 0.9
+                }).bindPopup(`${mode} stop`);
+                transportLayer.addLayer(marker);
+            });
+        });
+    }
+
+    function buildExistingStationsLayer(coordsList) {
+        existingStationsLayer.clearLayers();
+        coordsList.forEach(([lat, lon]) => {
+            let marker = L.circleMarker([lat, lon], {
+                radius: 3,
+                color: 'blue',
+                fillColor: 'blue',
+                fillOpacity: 0.9
+            }).bindPopup('Existing Station');
+            existingStationsLayer.addLayer(marker);
+        });
+    }
+
+    function buildLowTransitLayer(lowCenters) {
+        lowTransitLayer.clearLayers();
+        lowCenters.forEach(([lat, lon]) => {
+            let marker = L.circleMarker([lat, lon], {
+                radius: 5,
+                color: 'yellow',
+                fillColor: 'yellow',
+                fillOpacity: 0.8
+            }).bindPopup('Low Transit Area');
+            lowTransitLayer.addLayer(marker);
+        });
+    }
+
+    function buildProposedLayer(proposedLocs) {
+        proposedLayer.clearLayers();
+        proposedLocs.forEach(([lat, lon]) => {
+            let marker = L.circleMarker([lat, lon], {
+                radius: 8,
+                color: 'black',
+                fillColor: 'black',
+                fillOpacity: 0.9
+            }).bindPopup('Proposed Station');
+            proposedLayer.addLayer(marker);
+        });
+    }
+
+    function buildRoadHeatmapLayer(roadLines) {
+        roadHeatmapLayer.clearLayers();
+        // roadLines is an array: [{coords: [[lat1, lon1], [lat2, lon2]], score: 0.XX}, ...]
+        roadLines.forEach(line => {
+            let coords = line.coords;  // e.g. [[lat, lon], [lat, lon]]
+            let score = line.score;    // 0 to 1
+            let color = scoreToHexColor(score);
+            let poly = L.polyline(coords, {
+                color: color,
+                weight: 3
+            });
+            roadHeatmapLayer.addLayer(poly);
+        });
+    }
+
+    function scoreToHexColor(score) {
+        // Same logic as in your Folium: #RRGGBB, transitioning from e.g. blue to red
+        // or green to red. In your code you had:
+        // color = f'#{int(255*(1-score)):02x}00{int(255*score):02x}'
+        // Let's replicate that logic in JS
+        let r = Math.round(255 * (1 - score));
+        let g = 0;
+        let b = Math.round(255 * score);
+        // Convert to hex
+        let rh = r.toString(16).padStart(2, '0');
+        let gh = g.toString(16).padStart(2, '0');
+        let bh = b.toString(16).padStart(2, '0');
+        return `#${rh}${gh}${bh}`;
+    }
+
+
 
     // ----------------------------------
     // 14) SHOW / HIDE DYNAMIC POINTS

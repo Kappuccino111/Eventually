@@ -4,10 +4,15 @@ from fetch_solar_data import fetch_and_return_solar_data
 from model.predictive_model import (
     init,
     get_area_data,
+    haversine_distances,
     calculate_transit_density,
     identify_low_transit_areas,
     optimize_locations
 )
+import pandas as pd
+import networkx as nx
+from shapely.geometry import Point
+import numpy as np
 from app import cache  # Import the cache object from __init__.py
 
 main = Blueprint('main', __name__)
@@ -43,29 +48,114 @@ def get_wind_solar_data():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@main.route("/api/model-results", methods=["GET"])
-def model_results():
-    # 1) parse lat/lon/radius from query params
-    lat = request.args.get('latitude', type=float)
-    lon = request.args.get('longitude', type=float)
-    radius = request.args.get('radius', type=float)
-
-    if lat is None or lon is None or radius is None:
-        return jsonify({"error": "latitude, longitude, and radius are required"}), 400
-
+@main.route("/api/complete-model-results", methods=["GET"])
+def complete_model_results():
+    """
+    Returns JSON with all the data needed to replicate the Folium layers
+    (Public transport stops, low transit areas, proposed stations,
+     existing charging stations, road heatmap lines).
+    """
+    lat = float(request.args.get("latitude", 50.733334))
+    lon = float(request.args.get("longitude", 7.100000))
+    radius = float(request.args.get("radius", 25))
+    CENTER = (lat, lon)
+    RADIUS = radius
     try:
-        # 2) run the pipeline
+        # 1) Run the pipeline
         init(lat, lon, radius)
         networks, existing_stations = get_area_data()
         grid, density_scores = calculate_transit_density(networks, existing_stations)
         low_transit_centers = identify_low_transit_areas(grid, density_scores)
         proposed_locations = optimize_locations(low_transit_centers, existing_stations, networks)
 
-        # 3) Return as JSON (list of [lat, lon] pairs, for example)
+        # 2) Build transport data (bus, rail, subway)
+        #    We'll return these as arrays of lat/lon points.
+        transport_data = {}
+        colors = {'bus': 'green', 'rail': 'red', 'subway': 'orange'}
+        for mode, network in networks.items():
+            if mode == "drive":
+                continue
+            # Build a list of [lat, lon] for each node
+            nodes_df = pd.DataFrame({
+                "lat": nx.get_node_attributes(network, 'y'),
+                "lon": nx.get_node_attributes(network, 'x')
+            })
+            # Filter out nodes outside the radius (optional)
+            valid_nodes = []
+            for _, row in nodes_df.iterrows():
+                dist = haversine_distances(np.array([[row.lat, row.lon]]),
+                                           np.array([CENTER]))[0][0]
+                if dist <= RADIUS:
+                    valid_nodes.append([row.lat, row.lon])
+            transport_data[mode] = valid_nodes
+
+        # 3) Existing stations
+        existing_coords = []
+        if not existing_stations.empty:
+            for _, row in existing_stations.iterrows():
+                if isinstance(row.geometry, Point):
+                    coords = (row.geometry.y, row.geometry.x)
+                else:
+                    centroid = row.geometry.centroid
+                    coords = (centroid.y, centroid.x)
+                # Check distance if you want
+                dist = haversine_distances(np.array([coords]),
+                                           np.array([CENTER]))[0][0]
+                if dist <= RADIUS:
+                    existing_coords.append(coords)  # (lat, lon)
+
+        # 4) Build road heatmap lines
+        road_heat_data = []
+        drive_network = networks["drive"]
+        edges = [(u, v, d) for u, v, _, d in drive_network.edges(keys=True, data=True)
+                 if d.get('highway') == 'secondary']
+
+        edge_scores = []
+        filtered_edges = []
+        for u, v, _ in edges:
+            u_coords = (drive_network.nodes[u]['y'], drive_network.nodes[u]['x'])
+            v_coords = (drive_network.nodes[v]['y'], drive_network.nodes[v]['x'])
+            mid_point = np.array([(u_coords[0] + v_coords[0]) / 2,
+                                  (u_coords[1] + v_coords[1]) / 2])
+            # Check if midpoint is within radius
+            dist = haversine_distances(np.array([mid_point]), np.array([CENTER]))[0][0]
+            if dist <= RADIUS:
+                # sample 10 points along the edge to get a "score"
+                points = np.linspace([u_coords[0], u_coords[1]],
+                                     [v_coords[0], v_coords[1]], num=10)
+                sub_scores = []
+                for point in points:
+                    distances = haversine_distances(grid, point.reshape(1, 2))
+                    sub_scores.append(density_scores[np.argmin(distances)])
+                edge_avg = np.mean(sub_scores)
+                edge_scores.append(edge_avg)
+                filtered_edges.append((u_coords, v_coords))
+
+        if edge_scores:
+            edge_scores = np.array(edge_scores)
+            norm = (edge_scores - np.min(edge_scores)) / (np.max(edge_scores) - np.min(edge_scores))
+            for i, (u_coords, v_coords) in enumerate(filtered_edges):
+                score = norm[i]
+                # Store the line coordinates + the normalized score
+                road_heat_data.append({
+                    "coords": [
+                        [u_coords[0], u_coords[1]],  # lat, lon
+                        [v_coords[0], v_coords[1]]
+                    ],
+                    "score": float(score)
+                })
+
+        # 5) Return JSON
         return jsonify({
-            "low_transit_centers": low_transit_centers,
-            "proposed_locations": proposed_locations
+            "transport_data": transport_data,   # e.g. { "bus": [[lat, lon], ...], "rail": [...], ...}
+            "existing_stations": existing_coords,  # [[lat, lon], ...]
+            "low_transit_centers": low_transit_centers,  # [[lat, lon], ...]
+            "proposed_locations": proposed_locations,     # [[lat, lon], ...]
+            "road_heatmap": road_heat_data,     # [ {coords: [[lat, lon], [lat, lon]], score: 0.XX}, ... ]
+            "center": CENTER,                   # (lat, lon)
+            "radius": RADIUS
         })
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
