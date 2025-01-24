@@ -9,18 +9,69 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     const markers = L.markerClusterGroup();
 
-    await fetch('/static/assets/elektrotankstellen_wgs84.geojson')
-    .then(response => response.json())
-    .then(data => {
-        data.features.forEach(feature => {
-        const [lon, lat] = feature.geometry.coordinates;
-        const marker = L.marker([lat, lon]);
+    // await fetch('/static/assets/elektrotankstellen_wgs84.geojson')
+    // .then(response => response.json())
+    // .then(data => {
+    //     data.features.forEach(feature => {
+    //     const [lon, lat] = feature.geometry.coordinates;
+    //     const marker = L.marker([lat, lon]);
     
         
-        markers.addLayer(marker);
-        });
+    //     markers.addLayer(marker);
+    //     });
         
-    });
+    // });
+
+    var myStyle = {
+        "color": "#ff7800",
+        "weight": 5,
+        "opacity": 0.65
+    };
+
+    // await fetch('/static/assets/simplified_primary_roads.geojson')
+    // .then(response => response.json())
+    // .then(data => {
+    //     data.features.forEach(feature => {
+    //         L.geoJson(feature.geometry, {
+    //             style: myStyle
+    //         }).addTo(map)
+        
+    //     });
+        
+    // });
+
+    // await fetch('/static/assets/simplified_primary_roads_arnsberg.geojson')
+    // .then(response => response.json())
+    // .then(data => {
+    //     data.features.forEach(feature => {
+    //         L.geoJson(feature.geometry, {
+    //             style: myStyle
+    //         }).addTo(map)
+        
+    //     });
+        
+    // });
+
+    // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_cgn/{z}/{x}/{y}.pbf', {
+    //     rendererFactory: L.canvas.tile,
+    //     vectorTileLayerStyles: {
+    //       roads: { color: 'blue', weight: 2 }
+    //     }
+    //   }).addTo(map);
+
+    // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_detmold/{z}/{x}/{y}.pbf', {
+    // rendererFactory: L.canvas.tile,
+    // vectorTileLayerStyles: {
+    //     roads: { color: 'blue', weight: 2 }
+    // }
+    // }).addTo(map); 
+    
+    // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_ddorf/{z}/{x}/{y}.pbf', {
+    // rendererFactory: L.canvas.tile,
+    // vectorTileLayerStyles: {
+    //     roads: { color: 'blue', weight: 2 }
+    // }
+    // }).addTo(map);
 
 
     L.control.layers(null, {
@@ -50,14 +101,55 @@ document.addEventListener('DOMContentLoaded', async function () {
         }
     });
 
+    const fetchEVStations = async (south, west, north, east) => {
+        const endpoint = "https://overpass-api.de/api/interpreter";
+      
+        const query = `
+          [out:json][timeout:60];
+          node["amenity"="charging_station"](${south},${west},${north},${east});
+          out body;
+          >;
+          out skel qt;
+        `;
+      
+        try {
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({ data: query }),
+          });
+      
+          if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+          }
+      
+          const data = await response.json();
+          console.log(data); // Log the EV charging station data
+          return data
+        } catch (error) {
+          console.error("Error fetching EV stations:", error);
+        }
+      };
+      
+
     // Event listeners for checkbox and radius input
     checkbox.addEventListener('change', updateDynamicPoints);
-    radiusInput.addEventListener('input', function () {
+    radiusInput.addEventListener('input', async function () {
         console.log("Radius input changed.");
         // Update circle radius
         if (circle && lastSearchedLat && lastSearchedLon) {
             map.removeLayer(circle);
             addRadiusCircle(lastSearchedLat, lastSearchedLon);
+            let bbox = calculateBoundingBox(lastSearchedLat, lastSearchedLon)
+            let stations = await fetchEVStations(bbox.south, bbox.west, bbox.north, bbox.east)
+            
+            stations.elements.forEach((s) => {
+                const marker = L.marker([s.lat, s.lon]);
+                markers.addLayer(marker)    
+            })
+            markers.addTo(map)
         }
         // Update dynamic points if checkbox is checked
         if (checkbox.checked) {
@@ -65,7 +157,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         }
     });
 
-    function performSearch() {
+    async function performSearch() {
         var query = searchInput.value.trim();
         if (query === '') return;
 
@@ -94,6 +186,14 @@ document.addEventListener('DOMContentLoaded', async function () {
 
             // Add circle with dotted lines
             addRadiusCircle(lat, lon);
+            let bbox = calculateBoundingBox(lastSearchedLat, lastSearchedLon)
+            let stations = await fetchEVStations(bbox.south, bbox.west, bbox.north, bbox.east)
+            
+            stations.elements.forEach((s) => {
+                const marker = L.marker([s.lat, s.lon]);
+                markers.addLayer(marker)    
+            })
+            markers.addTo(map)
         } else {
             // Treat input as a text query
             query += ', Germany';
@@ -101,7 +201,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
             fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`)
                 .then(response => response.json())
-                .then(data => {
+                .then(async (data) => {
                     console.log("Search results from Nominatim:", data);
                     if (data.length > 0) {
                         var lat = parseFloat(data[0].lat);
@@ -119,6 +219,15 @@ document.addEventListener('DOMContentLoaded', async function () {
 
                         // Add circle with dotted lines
                         addRadiusCircle(lat, lon);
+
+                        let bbox = calculateBoundingBox(lastSearchedLat, lastSearchedLon)
+                        let stations = await fetchEVStations(bbox.south, bbox.west, bbox.north, bbox.east)
+                        
+                        stations.elements.forEach((s) => {
+                            const marker = L.marker([s.lat, s.lon]);
+                            markers.addLayer(marker)    
+                        })
+                        markers.addTo(map)
                     } else {
                         alert('Location not found in Germany');
                     }
@@ -150,6 +259,27 @@ document.addEventListener('DOMContentLoaded', async function () {
             generateDynamicPoints(lat, lon, radiusKm);
         }
     }
+
+    function calculateBoundingBox(lat, lon) {
+        radiusKm = radiusInput.value
+        const EARTH_RADIUS = 6371; // Earth's radius in km
+        const radiusRad = radiusKm / EARTH_RADIUS; // Convert radius to radians
+    
+        const latNorth = lat + (radiusRad * (180 / Math.PI)); // Convert radians to degrees
+        const latSouth = lat - (radiusRad * (180 / Math.PI));
+    
+        const lonEast = lon + (radiusRad * (180 / Math.PI)) / Math.cos(lat * Math.PI / 180);
+        const lonWest = lon - (radiusRad * (180 / Math.PI)) / Math.cos(lat * Math.PI / 180);
+    
+        return {
+            north: latNorth,
+            south: latSouth,
+            east: lonEast,
+            west: lonWest
+        };
+    }
+
+
 
     function generateDynamicPoints(lat, lon, radiusKm) {
         var numPoints = radiusKm * 4;
