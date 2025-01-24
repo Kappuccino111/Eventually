@@ -1,4 +1,4 @@
-document.addEventListener('DOMContentLoaded', function () {
+document.addEventListener('DOMContentLoaded', async function () {
     console.log("map.js is loaded");
 
     // ----------------------------------
@@ -11,6 +11,104 @@ document.addEventListener('DOMContentLoaded', function () {
         attribution:
             '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
+
+    const markers = L.markerClusterGroup();
+
+    var myStyle = {
+        "color": "#ff7800",
+        "weight": 5,
+        "opacity": 0.65
+    };
+
+    // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_cgn/{z}/{x}/{y}.pbf', {
+    //     rendererFactory: L.canvas.tile,
+    //     vectorTileLayerStyles: {
+    //       roads: { color: 'blue', weight: 2 }
+    //     }
+    //   }).addTo(map);
+
+    // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_detmold/{z}/{x}/{y}.pbf', {
+    // rendererFactory: L.canvas.tile,
+    // vectorTileLayerStyles: {
+    //     roads: { color: 'blue', weight: 2 }
+    // }
+    // }).addTo(map); 
+    
+    // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_ddorf/{z}/{x}/{y}.pbf', {
+    // rendererFactory: L.canvas.tile,
+    // vectorTileLayerStyles: {
+    //     roads: { color: 'blue', weight: 2 }
+    // }
+    // }).addTo(map);
+
+    // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_cgn/{z}/{x}/{y}.pbf', {
+    //     rendererFactory: L.canvas.tile,
+    //     vectorTileLayerStyles: {
+    //       roads: { color: 'blue', weight: 2 }
+    //     }
+    //   }).addTo(map);
+
+    // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_detmold/{z}/{x}/{y}.pbf', {
+    // rendererFactory: L.canvas.tile,
+    // vectorTileLayerStyles: {
+    //     roads: { color: 'blue', weight: 2 }
+    // }
+    // }).addTo(map); 
+    
+    // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_ddorf/{z}/{x}/{y}.pbf', {
+    // rendererFactory: L.canvas.tile,
+    // vectorTileLayerStyles: {
+    //     roads: { color: 'blue', weight: 2 }
+    // }
+    // }).addTo(map);
+
+    // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_cgn/{z}/{x}/{y}.pbf', {
+    //     rendererFactory: L.canvas.tile,
+    //     vectorTileLayerStyles: {
+    //       roads: { color: 'blue', weight: 2 }
+    //     }
+    //   }).addTo(map);
+
+    // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_detmold/{z}/{x}/{y}.pbf', {
+    // rendererFactory: L.canvas.tile,
+    // vectorTileLayerStyles: {
+    //     roads: { color: 'blue', weight: 2 }
+    // }
+    // }).addTo(map); 
+    
+    // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_ddorf/{z}/{x}/{y}.pbf', {
+    // rendererFactory: L.canvas.tile,
+    // vectorTileLayerStyles: {
+    //     roads: { color: 'blue', weight: 2 }
+    // }
+    // }).addTo(map);
+
+    // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_cgn/{z}/{x}/{y}.pbf', {
+    //     rendererFactory: L.canvas.tile,
+    //     vectorTileLayerStyles: {
+    //       roads: { color: 'blue', weight: 2 }
+    //     }
+    //   }).addTo(map);
+
+    // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_detmold/{z}/{x}/{y}.pbf', {
+    // rendererFactory: L.canvas.tile,
+    // vectorTileLayerStyles: {
+    //     roads: { color: 'blue', weight: 2 }
+    // }
+    // }).addTo(map); 
+    
+    // L.vectorGrid.protobuf('http://localhost:8080/data/primary_roads_ddorf/{z}/{x}/{y}.pbf', {
+    // rendererFactory: L.canvas.tile,
+    // vectorTileLayerStyles: {
+    //     roads: { color: 'blue', weight: 2 }
+    // }
+    // }).addTo(map);
+
+
+    L.control.layers(null, {
+        "Clustered EV-Markers": markers,
+    }).addTo(map);
+
 
     // ----------------------------------
     //  2) DOM ELEMENTS & VARIABLES
@@ -50,11 +148,44 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
+    const fetchEVStations = async (south, west, north, east) => {
+        const endpoint = "https://overpass-api.de/api/interpreter";
+      
+        const query = `
+          [out:json][timeout:60];
+          node["amenity"="charging_station"](${south},${west},${north},${east});
+          out body;
+          >;
+          out skel qt;
+        `;
+      
+        try {
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({ data: query }),
+          });
+      
+          if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+          }
+      
+          const data = await response.json();
+          console.log(data); // Log the EV charging station data
+          return data
+        } catch (error) {
+          console.error("Error fetching EV stations:", error);
+        }
+      };
+      
+
     checkboxInitial.addEventListener('change', updateDynamicPoints);
     checkboxFiltered.addEventListener('change', toggleFilteredPoints);
     hullCheckbox.addEventListener('change', toggleHullPolygons);
 
-    radiusInput.addEventListener('input', function () {
+    radiusInput.addEventListener('input', async function () {
         console.log("Radius input changed.");
 
         // If we have a circle, remove it and re-add with new radius
@@ -83,7 +214,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // ----------------------------------
     //  5) SEARCH LOGIC
     // ----------------------------------
-    function performSearch() {
+    async function performSearch() {
         var query = searchInput.value.trim();
         if (query === '') return;
 
@@ -98,6 +229,14 @@ document.addEventListener('DOMContentLoaded', function () {
             var lat = parseFloat(match[1]);
             var lon = parseFloat(match[3]);
             handleSearchResult(lat, lon, `Latitude: ${lat}, Longitude: ${lon}`);
+            let bbox = calculateBoundingBox(lastSearchedLat, lastSearchedLon)
+            let stations = await fetchEVStations(bbox.south, bbox.west, bbox.north, bbox.east)
+            
+            stations.elements.forEach((s) => {
+                const marker = L.marker([s.lat, s.lon]);
+                markers.addLayer(marker)    
+            })
+            markers.addTo(map)
         } else {
             // treat as a textual query
             // e.g., append ", Germany" for searching
@@ -107,12 +246,21 @@ document.addEventListener('DOMContentLoaded', function () {
                 `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`
             )
                 .then(response => response.json())
-                .then(data => {
+                .then(async (data) => {
                     console.log("Search results from Nominatim:", data);
                     if (data.length > 0) {
                         var lat = parseFloat(data[0].lat);
                         var lon = parseFloat(data[0].lon);
                         handleSearchResult(lat, lon, data[0].display_name);
+
+                        let bbox = calculateBoundingBox(lastSearchedLat, lastSearchedLon)
+                        let stations = await fetchEVStations(bbox.south, bbox.west, bbox.north, bbox.east)
+                        
+                        stations.elements.forEach((s) => {
+                            const marker = L.marker([s.lat, s.lon]);
+                            markers.addLayer(marker)    
+                        })
+                        markers.addTo(map)
                     } else {
                         alert('Location not found in Germany');
                     }
@@ -156,6 +304,90 @@ document.addEventListener('DOMContentLoaded', function () {
             generateDynamicPoints(lat, lon, radiusKm);
         }
     }
+
+    function calculateBoundingBox(lat, lon) {
+        radiusKm = radiusInput.value
+        const EARTH_RADIUS = 6371; // Earth's radius in km
+        const radiusRad = radiusKm / EARTH_RADIUS; // Convert radius to radians
+    
+        const latNorth = lat + (radiusRad * (180 / Math.PI)); // Convert radians to degrees
+        const latSouth = lat - (radiusRad * (180 / Math.PI));
+    
+        const lonEast = lon + (radiusRad * (180 / Math.PI)) / Math.cos(lat * Math.PI / 180);
+        const lonWest = lon - (radiusRad * (180 / Math.PI)) / Math.cos(lat * Math.PI / 180);
+    
+        return {
+            north: latNorth,
+            south: latSouth,
+            east: lonEast,
+            west: lonWest
+        };
+    }
+
+
+
+    function calculateBoundingBox(lat, lon) {
+        radiusKm = radiusInput.value
+        const EARTH_RADIUS = 6371; // Earth's radius in km
+        const radiusRad = radiusKm / EARTH_RADIUS; // Convert radius to radians
+    
+        const latNorth = lat + (radiusRad * (180 / Math.PI)); // Convert radians to degrees
+        const latSouth = lat - (radiusRad * (180 / Math.PI));
+    
+        const lonEast = lon + (radiusRad * (180 / Math.PI)) / Math.cos(lat * Math.PI / 180);
+        const lonWest = lon - (radiusRad * (180 / Math.PI)) / Math.cos(lat * Math.PI / 180);
+    
+        return {
+            north: latNorth,
+            south: latSouth,
+            east: lonEast,
+            west: lonWest
+        };
+    }
+
+
+
+    function calculateBoundingBox(lat, lon) {
+        radiusKm = radiusInput.value
+        const EARTH_RADIUS = 6371; // Earth's radius in km
+        const radiusRad = radiusKm / EARTH_RADIUS; // Convert radius to radians
+    
+        const latNorth = lat + (radiusRad * (180 / Math.PI)); // Convert radians to degrees
+        const latSouth = lat - (radiusRad * (180 / Math.PI));
+    
+        const lonEast = lon + (radiusRad * (180 / Math.PI)) / Math.cos(lat * Math.PI / 180);
+        const lonWest = lon - (radiusRad * (180 / Math.PI)) / Math.cos(lat * Math.PI / 180);
+    
+        return {
+            north: latNorth,
+            south: latSouth,
+            east: lonEast,
+            west: lonWest
+        };
+    }
+
+
+
+    function calculateBoundingBox(lat, lon) {
+        radiusKm = radiusInput.value
+        const EARTH_RADIUS = 6371; // Earth's radius in km
+        const radiusRad = radiusKm / EARTH_RADIUS; // Convert radius to radians
+    
+        const latNorth = lat + (radiusRad * (180 / Math.PI)); // Convert radians to degrees
+        const latSouth = lat - (radiusRad * (180 / Math.PI));
+    
+        const lonEast = lon + (radiusRad * (180 / Math.PI)) / Math.cos(lat * Math.PI / 180);
+        const lonWest = lon - (radiusRad * (180 / Math.PI)) / Math.cos(lat * Math.PI / 180);
+    
+        return {
+            north: latNorth,
+            south: latSouth,
+            east: lonEast,
+            west: lonWest
+        };
+    }
+
+
 
     // ----------------------------------
     //  7) DYNAMIC POINTS & TOTAVG LOGIC
@@ -283,6 +515,97 @@ document.addEventListener('DOMContentLoaded', function () {
     // ----------------------------------
     //  9) MARKER CLICK → DISPLAY POPUP
     // ----------------------------------
+    // function onPointClick(lat, lon) {
+    //     console.log(`Point clicked at lat: ${lat}, lon: ${lon}`);
+
+    //     const cacheKey = `${lat.toFixed(5)},${lon.toFixed(5)}`;
+    //     if (dataCache.has(cacheKey)) {
+    //         const cachedEntry = dataCache.get(cacheKey);
+    //         if (cachedEntry.status === 'fulfilled') {
+    //             displayDataPopup(lat, lon, cachedEntry.value);
+    //         } else if (cachedEntry.status === 'rejected') {
+    //             displayErrorPopup(lat, lon, cachedEntry.reason);
+    //         } else if (cachedEntry.status === 'pending') {
+    //             // Data is being fetched, show loading and wait
+    //             const loadingPopup = L.popup({ maxWidth: 600 })
+    //                 .setLatLng([lat, lon])
+    //                 .setContent(`<p>Loading data for (${lat.toFixed(5)}, ${lon.toFixed(5)})...</p>`)
+    //                 .openOn(map);
+
+    //     // Fetch data from the API
+    //     fetch(`/api/wind-solar-data?latitude=${lat}&longitude=${lon}`)
+    //         .then(response => {
+    //             console.log("API Response Status:", response.status);
+    //             return response.json();
+    //         })
+    //         .then(data => {
+    //             console.log("Received data:", data);
+
+    //             if (data.error) {
+    //                 // Update popup with error message
+    //                 loadingPopup.setContent(`<p>Error fetching data: ${data.error}</p>`);
+    //                 return;
+    //             }
+
+    //             // Extract wind and solar data
+    //             const windData = data.wind_data.data;
+    //             const solarData = data.solar_data.data;
+
+    //             // Averages
+    //             const avgWind10m = data.wind_data.avg_10m.toFixed(2);
+    //             const avgWind50m = data.wind_data.avg_50m.toFixed(2);
+    //             const avgGHI = data.solar_data.avg_ghi.toFixed(2);
+    //             const avgDNI = data.solar_data.avg_dni.toFixed(2);
+
+    //             // Generate the table content
+    //             let tableHtml = `
+    //             <table border="1" style="border-collapse: collapse; width: 100%; text-align: center;">
+    //                 <tr>
+    //                     <th>Year</th>
+    //                     <th>Wind Energy (10m)</th>
+    //                     <th>Wind Energy (50m)</th>
+    //                     <th>GHI</th>
+    //                     <th>DNI</th>
+    //                 </tr>
+    //         `;
+
+    //             windData.forEach((item, index) => {
+    //                 const solar = solarData[index];
+    //                 tableHtml += `
+    //                 <tr>
+    //                     <td>${item.year}</td>
+    //                     <td>${item.wind_energy_10m.toFixed(2)} kWh/m²</td>
+    //                     <td>${item.wind_energy_50m.toFixed(2)} kWh/m²</td>
+    //                     <td>${solar.ghi.toFixed(2)} kWh/m²</td>
+    //                     <td>${solar.dni.toFixed(2)} kWh/m²</td>
+    //                 </tr>
+    //             `;
+    //             });
+
+    //             tableHtml += `
+    //             <tr style="font-weight: bold;">
+    //                 <td>15-Year Avg</td>
+    //                 <td>${avgWind10m} kWh/m²</td>
+    //                 <td>${avgWind50m} kWh/m²</td>
+    //                 <td>${avgGHI} kWh/m²</td>
+    //                 <td>${avgDNI} kWh/m²</td>
+    //             </tr>
+    //         </table>
+    //         `;
+
+    //             // Update the popup with the table
+    //             loadingPopup.setContent(`
+    //             <h4>Data for (${lat.toFixed(5)}, ${lon.toFixed(5)})</h4>
+    //             ${tableHtml}
+    //         `);
+    //         })
+    //         .catch(error => {
+    //             console.error('Error fetching wind/solar data:', error);
+    //             // Update popup with error message
+    //             loadingPopup.setContent(`<p>Error fetching data: ${error.message}</p>`);
+    //         });
+    // }
+
     function onPointClick(lat, lon) {
         console.log(`Point clicked at lat: ${lat}, lon: ${lon}`);
         const cacheKey = `${lat.toFixed(5)},${lon.toFixed(5)}`;
