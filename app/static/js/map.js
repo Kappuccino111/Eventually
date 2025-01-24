@@ -1,40 +1,48 @@
 document.addEventListener('DOMContentLoaded', function () {
     console.log("map.js is loaded");
 
-    // Initialize the map
+    // ----------------------------------
+    //  1) INITIALIZE THE MAP
+    // ----------------------------------
     var map = L.map('map').setView([51.1657, 10.4515], 6);
 
     // Add OpenStreetMap tile layer
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
 
-    // Initialize variables
-    var marker;
-    var circle;
+    // ----------------------------------
+    //  2) DOM ELEMENTS & VARIABLES
+    // ----------------------------------
+    var marker;          // main marker for search location
+    var circle;          // circle for radius
+    var dynamicMarkers = [];  // array of dynamic circleMarkers
+    var filteredMarkers = []; // array of "filtered" overlays (green circles)
+    var totAvgValues = [];    // keep track of totAvg across all dynamic points
+    var averageTotAvg = 0;    // the average totAvg across points
 
     var searchInput = document.getElementById('search-input');
     var searchButton = document.getElementById('search-button');
     var radiusInput = document.getElementById('radius-input');
-    var checkboxInitial = document.getElementById('initial_points'); // Checkbox for dynamic points
-    var checkboxFiltered = document.getElementById('filtered_points'); // Checkbox for filtered points
+    var checkboxInitial = document.getElementById('initial_points');  // show/hide dynamic points
+    var checkboxFiltered = document.getElementById('filtered_points'); // show/hide “filtered” points
+    var hullCheckbox = document.getElementById('hull_points');     // show/hide convex hull
 
     var lastSearchedLat, lastSearchedLon;
 
-    // Arrays to hold dynamic and filtered markers
-    var dynamicMarkers = [];
-    var filteredMarkers = [];
-
-    // Array to store totAvg values
-    var totAvgValues = [];
-
-    // Variable to store the average totAvg of all points
-    var averageTotAvg = 0;
-
-    // Data cache: Map with key as "lat,lon" and value as fetched data
+    // Our data cache: Map with key "lat,lon" => { status, value, ...}
     const dataCache = new Map();
 
-    // Event listeners
+    // ----------------------------------
+    //  3) HULL-LAYER VARIABLES
+    // ----------------------------------
+    let blueHullLayer = null;
+    let redHullLayer = null;
+
+    // ----------------------------------
+    //  4) EVENT LISTENERS
+    // ----------------------------------
     searchButton.addEventListener('click', performSearch);
     searchInput.addEventListener('keypress', function (e) {
         if (e.key === 'Enter') {
@@ -44,14 +52,18 @@ document.addEventListener('DOMContentLoaded', function () {
 
     checkboxInitial.addEventListener('change', updateDynamicPoints);
     checkboxFiltered.addEventListener('change', toggleFilteredPoints);
+    hullCheckbox.addEventListener('change', toggleHullPolygons);
+
     radiusInput.addEventListener('input', function () {
         console.log("Radius input changed.");
-        // Update circle radius
+
+        // If we have a circle, remove it and re-add with new radius
         if (circle && lastSearchedLat && lastSearchedLon) {
             map.removeLayer(circle);
             addRadiusCircle(lastSearchedLat, lastSearchedLon);
         }
-        // Update dynamic points if initial points checkbox is checked
+
+        // Re-generate dynamic points if needed
         if (checkboxInitial.checked) {
             updateDynamicPoints();
         }
@@ -61,65 +73,46 @@ document.addEventListener('DOMContentLoaded', function () {
             removeFilteredMarkers();
             addFilteredMarkers();
         }
+
+        // Re-draw hull if needed
+        if (hullCheckbox.checked) {
+            toggleHullPolygons(); // re-run the hull logic
+        }
     });
 
-    /**
-     * Performs search based on user input.
-     */
+    // ----------------------------------
+    //  5) SEARCH LOGIC
+    // ----------------------------------
     function performSearch() {
         var query = searchInput.value.trim();
         if (query === '') return;
 
         console.log("Performing search for:", query);
 
-        // Check if input is in the form of "latitude,longitude"
+        // Check if input is "lat,lon"
         var latLonRegex = /^(-?\d+(\.\d+)?),\s*(-?\d+(\.\d+)?)$/;
         var match = query.match(latLonRegex);
 
         if (match) {
+            // user typed coordinates
             var lat = parseFloat(match[1]);
             var lon = parseFloat(match[3]);
-
-            console.log("Performing search with coordinates:", lat, lon);
-
-            lastSearchedLat = lat;
-            lastSearchedLon = lon;
-            map.setView([lat, lon], 10);
-
-            console.log("Map view set to:", lat, lon);
-
-            if (marker) map.removeLayer(marker);
-            marker = L.marker([lat, lon]).addTo(map)
-                .bindPopup(`Latitude: ${lat}, Longitude: ${lon}`)
-                .openPopup();
-
-            // Add circle with dotted lines
-            addRadiusCircle(lat, lon);
+            handleSearchResult(lat, lon, `Latitude: ${lat}, Longitude: ${lon}`);
         } else {
-            // Treat input as a text query
+            // treat as a textual query
+            // e.g., append ", Germany" for searching
             query += ', Germany';
-            console.log("Performing search with query:", query);
 
-            fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`)
+            fetch(
+                `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`
+            )
                 .then(response => response.json())
                 .then(data => {
                     console.log("Search results from Nominatim:", data);
                     if (data.length > 0) {
                         var lat = parseFloat(data[0].lat);
                         var lon = parseFloat(data[0].lon);
-                        lastSearchedLat = lat;
-                        lastSearchedLon = lon;
-                        map.setView([lat, lon], 10);
-
-                        console.log("Map view set to:", lat, lon);
-
-                        if (marker) map.removeLayer(marker);
-                        marker = L.marker([lat, lon]).addTo(map)
-                            .bindPopup(data[0].display_name)
-                            .openPopup();
-
-                        // Add circle with dotted lines
-                        addRadiusCircle(lat, lon);
+                        handleSearchResult(lat, lon, data[0].display_name);
                     } else {
                         alert('Location not found in Germany');
                     }
@@ -128,28 +121,35 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    /**
-     * Adds a radius circle to the map.
-     * @param {number} lat - Latitude of the center.
-     * @param {number} lon - Longitude of the center.
-     */
-    function addRadiusCircle(lat, lon) {
-        var radiusKm = parseInt(radiusInput.value);
-        var radiusMeters = radiusKm * 1000; // Convert km to meters
+    // Helper for setting map center, marker, circle, etc.
+    function handleSearchResult(lat, lon, popupMsg) {
+        lastSearchedLat = lat;
+        lastSearchedLon = lon;
+        map.setView([lat, lon], 10);
 
-        console.log(`Adding radius circle of ${radiusKm} km around (${lat}, ${lon})`);
+        // Move the single search marker
+        if (marker) map.removeLayer(marker);
+        marker = L.marker([lat, lon]).addTo(map).bindPopup(popupMsg).openPopup();
+
+        // Add circle with dotted lines
+        addRadiusCircle(lat, lon);
+    }
+
+    // ----------------------------------
+    //  6) RADIUS CIRCLE
+    // ----------------------------------
+    function addRadiusCircle(lat, lon) {
+        var radiusKm = parseInt(radiusInput.value) || 0;
+        var radiusMeters = radiusKm * 1000;
 
         if (circle) map.removeLayer(circle);
-
         circle = L.circle([lat, lon], {
             color: 'Black',
             weight: 2,
-            dashArray: '5, 5', // Dotted line style
+            dashArray: '5, 5', // dotted
             fillOpacity: 0.0,
             radius: radiusMeters
         }).addTo(map);
-
-        console.log("Circle added with radius:", radiusMeters, "meters");
 
         // If initial points checkbox is checked, generate dynamic points
         if (checkboxInitial.checked) {
@@ -157,86 +157,82 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    /**
-     * Generates dynamic points within the specified radius.
-     * @param {number} lat - Latitude of the center.
-     * @param {number} lon - Longitude of the center.
-     * @param {number} radiusKm - Radius in kilometers.
-     */
+    // ----------------------------------
+    //  7) DYNAMIC POINTS & TOTAVG LOGIC
+    // ----------------------------------
     function generateDynamicPoints(lat, lon, radiusKm) {
-        var numPoints = radiusKm * 2;
+        var numPoints = radiusKm * 2; // e.g., 2 points per km
         console.log(`Generating ${numPoints} dynamic points within the circle.`);
 
-        // Remove existing dynamic markers
-        dynamicMarkers.forEach(marker => map.removeLayer(marker));
+        // Remove any existing dynamic markers
+        dynamicMarkers.forEach(m => map.removeLayer(m));
         dynamicMarkers = [];
-
-        // Clear previous totAvg values
         totAvgValues = [];
 
         if (numPoints === 0) return;
 
-        // Determine grid dimensions
-        var gridSize = Math.ceil(Math.sqrt(numPoints)); // Number of points per axis
-        var step = (2 * radiusKm * 1000) / gridSize; // Step in meters
-
-        // Convert step from meters to degrees approximately
+        // We'll place points in a rough grid
+        var gridSize = Math.ceil(Math.sqrt(numPoints));
+        var step = (2 * radiusKm * 1000) / gridSize; // meters per step
         var stepLat = metersToDegrees(step, 'lat');
         var stepLon = metersToDegrees(step, 'lon', lat);
 
         var halfGrid = Math.floor(gridSize / 2);
-
         var pointsPlaced = 0;
 
         for (var i = -halfGrid; i <= halfGrid && pointsPlaced < numPoints; i++) {
             for (var j = -halfGrid; j <= halfGrid && pointsPlaced < numPoints; j++) {
-                // Calculate offset in degrees
                 var offsetLat = i * stepLat;
                 var offsetLon = j * stepLon;
-
                 var pointLat = lat + offsetLat;
                 var pointLon = lon + offsetLon;
 
-                // Calculate distance from center
                 var distance = getDistanceFromLatLonInKm(lat, lon, pointLat, pointLon);
-
                 if (distance <= radiusKm) {
+                    // Add a circleMarker
                     var pointMarker = L.circleMarker([pointLat, pointLon], {
                         radius: 5,
                         color: 'red',
                         fillColor: '#f03',
                         fillOpacity: 0.5
-                    }).addTo(map)
-                        .bindPopup(`Point ${pointsPlaced + 1}: (${pointLat.toFixed(5)}, ${pointLon.toFixed(5)})`);
+                    })
+                        .addTo(map)
+                        .bindPopup(
+                            `Point ${pointsPlaced + 1}: (${pointLat.toFixed(5)}, ${pointLon.toFixed(5)})`
+                        );
 
-                    console.log(`Point added at: (${pointLat}, ${pointLon})`);
                     dynamicMarkers.push(pointMarker);
                     pointsPlaced++;
 
-                    // Initiate background data fetching for this point
-                    fetchAndCacheData(pointLat, pointLon).then(data => {
-                        totAvgValues.push(data.totAvg);
-                        computeAverageTotAvg();
-                        // If Filtered Points checkbox is checked, evaluate and possibly add green circle
-                        if (checkboxFiltered.checked) {
-                            evaluateAndAddFilteredMarker(pointLat, pointLon, data.totAvg);
-                        }
-                    }).catch(error => {
-                        console.error(`Error fetching data for point (${pointLat}, ${pointLon}):`, error);
-                    });
+                    // Fetch data in the background
+                    fetchAndCacheData(pointLat, pointLon)
+                        .then(data => {
+                            totAvgValues.push(data.totAvg);
+                            computeAverageTotAvg();
+                            // If "filtered points" is checked, possibly add green circle
+                            if (checkboxFiltered.checked) {
+                                evaluateAndAddFilteredMarker(pointLat, pointLon, data.totAvg);
+                            }
+
+                            // If hull is checked, re-draw hull polygons
+                            if (hullCheckbox.checked) {
+                                toggleHullPolygons();
+                            }
+                        })
+                        .catch(error => {
+                            console.error(
+                                `Error fetching data for point (${pointLat}, ${pointLon}):`,
+                                error
+                            );
+                        });
                 }
             }
         }
 
         console.log(`Placed ${pointsPlaced} points within the circle.`);
-
-        // Attach click handlers to all markers
-        attachClickHandlers();
+        attachClickHandlers(); // let them show popups when clicked
     }
 
-    /**
-     * Computes the average totAvg across all points.
-     */
     function computeAverageTotAvg() {
         if (totAvgValues.length === 0) {
             averageTotAvg = 0;
@@ -246,116 +242,82 @@ document.addEventListener('DOMContentLoaded', function () {
         averageTotAvg = sum / totAvgValues.length;
         console.log(`Computed average totAvg: ${averageTotAvg.toFixed(2)}`);
 
-        // If Filtered Points checkbox is checked, update filtered markers
+        // If Filtered Points checkbox is checked, update
         if (checkboxFiltered.checked) {
             removeFilteredMarkers();
             addFilteredMarkers();
         }
     }
 
-    /**
-     * Converts meters to degrees.
-     * @param {number} meters - Distance in meters.
-     * @param {string} type - 'lat' or 'lon'.
-     * @param {number} [lat=0] - Latitude for longitude conversion.
-     * @returns {number} Degrees.
-     */
+    // ----------------------------------
+    //  8) DISTANCE/CONVERSION HELPERS
+    // ----------------------------------
     function metersToDegrees(meters, type, lat = 0) {
-        var degrees;
         if (type === 'lat') {
-            degrees = meters / 111320; // Approximation for latitude
+            return meters / 111320; // approximate
         } else if (type === 'lon') {
-            degrees = meters / (40075000 * Math.cos(toRadians(lat)) / 360);
+            // approximate for the given latitude
+            return meters / (40075000 * Math.cos(toRadians(lat)) / 360);
         }
-        return degrees;
+        return 0;
     }
 
-    /**
-     * Calculates the distance between two lat/lon points in kilometers.
-     * @param {number} lat1 - Latitude of the first point.
-     * @param {number} lon1 - Longitude of the first point.
-     * @param {number} lat2 - Latitude of the second point.
-     * @param {number} lon2 - Longitude of the second point.
-     * @returns {number} Distance in kilometers.
-     */
     function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
-        var R = 6371; // Radius of the earth in km
+        var R = 6371; // earth radius in km
         var dLat = toRadians(lat2 - lat1);
         var dLon = toRadians(lon2 - lon1);
         var a =
             Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) *
-            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            Math.cos(toRadians(lat1)) *
+            Math.cos(toRadians(lat2)) *
+            Math.sin(dLon / 2) *
+            Math.sin(dLon / 2);
         var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        var d = R * c; // Distance in km
-        return d;
+        return R * c;
     }
 
-    /**
-     * Converts degrees to radians.
-     * @param {number} degrees - Degrees.
-     * @returns {number} Radians.
-     */
-    function toRadians(degrees) {
-        return degrees * Math.PI / 180;
+    function toRadians(deg) {
+        return (deg * Math.PI) / 180;
     }
 
-    /**
-     * Handles the click event on a dynamic point.
-     * @param {number} lat - Latitude of the point.
-     * @param {number} lon - Longitude of the point.
-     */
+    // ----------------------------------
+    //  9) MARKER CLICK → DISPLAY POPUP
+    // ----------------------------------
     function onPointClick(lat, lon) {
         console.log(`Point clicked at lat: ${lat}, lon: ${lon}`);
-
         const cacheKey = `${lat.toFixed(5)},${lon.toFixed(5)}`;
-        if (dataCache.has(cacheKey)) {
-            const cachedEntry = dataCache.get(cacheKey);
-            if (cachedEntry.status === 'fulfilled') {
-                displayDataPopup(lat, lon, cachedEntry.value);
-            } else if (cachedEntry.status === 'rejected') {
-                displayErrorPopup(lat, lon, cachedEntry.reason);
-            } else if (cachedEntry.status === 'pending') {
-                // Data is being fetched, show loading and wait
-                const loadingPopup = L.popup({ maxWidth: 600 })
-                    .setLatLng([lat, lon])
-                    .setContent(`<p>Loading data for (${lat.toFixed(5)}, ${lon.toFixed(5)})...</p>`)
-                    .openOn(map);
 
-                cachedEntry.promise.then(data => {
-                    displayDataPopup(lat, lon, data);
-                }).catch(error => {
-                    displayErrorPopup(lat, lon, error.message);
-                });
-            }
-        } else {
-            console.log("Data not in cache, fetching now.");
-            // Show loading popup
-            const loadingPopup = L.popup({ maxWidth: 600 })
-                .setLatLng([lat, lon])
-                .setContent(`<p>Loading data for (${lat.toFixed(5)}, ${lon.toFixed(5)})...</p>`)
-                .openOn(map);
+        if (!dataCache.has(cacheKey)) {
+            // Not in cache, fetch now
+            showLoadingPopup(lat, lon);
+            fetchAndCacheData(lat, lon)
+                .then(data => displayDataPopup(lat, lon, data))
+                .catch(error => displayErrorPopup(lat, lon, error.message));
+            return;
+        }
 
-            // Fetch data and update the cache
-            fetchAndCacheData(lat, lon).then(data => {
-                if (data) {
-                    displayDataPopup(lat, lon, data);
-                } else {
-                    displayErrorPopup(lat, lon, 'No data available.');
-                }
-            }).catch(error => {
-                console.error('Error fetching wind/solar data:', error);
-                displayErrorPopup(lat, lon, error.message);
-            });
+        const entry = dataCache.get(cacheKey);
+        if (entry.status === 'fulfilled') {
+            displayDataPopup(lat, lon, entry.value);
+        } else if (entry.status === 'rejected') {
+            displayErrorPopup(lat, lon, entry.reason);
+        } else if (entry.status === 'pending') {
+            showLoadingPopup(lat, lon);
+            entry.promise
+                .then(data => displayDataPopup(lat, lon, data))
+                .catch(error => displayErrorPopup(lat, lon, error.message));
         }
     }
 
-    /**
-     * Attaches click event handlers to all dynamic markers.
-     */
+    function showLoadingPopup(lat, lon) {
+        L.popup({ maxWidth: 600 })
+            .setLatLng([lat, lon])
+            .setContent(`<p>Loading data for (${lat.toFixed(5)}, ${lon.toFixed(5)})...</p>`)
+            .openOn(map);
+    }
+
     function attachClickHandlers() {
         dynamicMarkers.forEach(marker => {
-            console.log("Attaching click event to marker:", marker.getLatLng());
             marker.on('click', () => {
                 const { lat, lng } = marker.getLatLng();
                 onPointClick(lat, lng);
@@ -363,16 +325,11 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    /**
-     * Fetches data from the API and caches it.
-     * @param {number} lat - Latitude of the point.
-     * @param {number} lon - Longitude of the point.
-     * @returns {Promise<Object>} The fetched data.
-     */
+    // ----------------------------------
+    // 10) FETCH & CACHE WIND-SOLAR DATA
+    // ----------------------------------
     async function fetchAndCacheData(lat, lon) {
         const cacheKey = `${lat.toFixed(5)},${lon.toFixed(5)}`;
-
-        // If already fetching or fetched, return the existing promise or data
         if (dataCache.has(cacheKey)) {
             const existingEntry = dataCache.get(cacheKey);
             if (existingEntry.status === 'pending') {
@@ -384,62 +341,54 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         }
 
-        // Create a promise for the fetch operation
+        // create a promise to fetch
         const fetchPromise = fetch(`/api/wind-solar-data?latitude=${lat}&longitude=${lon}`)
             .then(response => {
-                console.log("API Response Status:", response.status);
                 if (!response.ok) {
                     throw new Error(`API request failed with status ${response.status}`);
                 }
                 return response.json();
             })
             .then(data => {
-                console.log("Received data:", data);
                 if (data.error) {
                     throw new Error(data.error);
                 }
 
-                // Calculate totAvg
+                // Example: compute totAvg
                 const wind10m = data.wind_data.avg_10m;
                 const wind50m = data.wind_data.avg_50m;
                 const ghi = data.solar_data.avg_ghi;
                 const dni = data.solar_data.avg_dni;
                 const totAvg = (wind10m + wind50m + ghi + dni) / 4;
-
-                // Attach totAvg to the data object
                 data.totAvg = totAvg;
 
-                // Cache the fulfilled data with totAvg
+                // EXAMPLE: Suppose your API also returns "normalized" (0 or 1)
+                // If not, you can define your own logic to set data.normalized
+                data.normalized = totAvg > averageTotAvg ? 1 : 0;
+
+                // Mark this fetch as fulfilled in the cache
                 dataCache.set(cacheKey, { status: 'fulfilled', value: data });
                 return data;
             })
             .catch(error => {
-                console.error('Error fetching wind/solar data:', error);
-                // Cache the rejected state
                 dataCache.set(cacheKey, { status: 'rejected', reason: error });
                 throw error;
             });
 
-        // Cache the pending promise
         dataCache.set(cacheKey, { status: 'pending', promise: fetchPromise });
-
         return fetchPromise;
     }
 
-    /**
-     * Displays the data in a popup.
-     * @param {number} lat - Latitude of the point.
-     * @param {number} lon - Longitude of the point.
-     * @param {Object} data - The data to display.
-     */
+    // ----------------------------------
+    // 11) DISPLAY POPUPS
+    // ----------------------------------
     function displayDataPopup(lat, lon, data) {
-        // Create a popup with a loading message and custom maxWidth
-        const dataPopup = L.popup({ maxWidth: 600 }) // Increase maxWidth to fit the table
+        const dataPopup = L.popup({ maxWidth: 600 })
             .setLatLng([lat, lon])
             .setContent(`<p>Loading data for (${lat.toFixed(5)}, ${lon.toFixed(5)})...</p>`)
             .openOn(map);
 
-        // Extract wind and solar data
+        // Extract arrays
         const windData = data.wind_data.data;
         const solarData = data.solar_data.data;
 
@@ -449,164 +398,249 @@ document.addEventListener('DOMContentLoaded', function () {
         const avgGHI = data.solar_data.avg_ghi.toFixed(2);
         const avgDNI = data.solar_data.avg_dni.toFixed(2);
 
-        const totalAvg = (parseFloat(avgWind10m) + parseFloat(avgWind50m) + parseFloat(avgGHI) + parseFloat(avgDNI)) / 4;
-
-        // Generate the table content
+        // Combine them into a small table
         let tableHtml = `
-        <table style="border-collapse: collapse; width: 100%; text-align: center;">
+          <table style="border-collapse: collapse; width: 100%; text-align: center;">
             <thead>
-                <tr style="background-color: #f2f2f2;">
-                    <th style="border: 1px solid #ddd; padding: 8px;">Year</th>
-                    <th style="border: 1px solid #ddd; padding: 8px;">Wind Energy (10m)</th>
-                    <th style="border: 1px solid #ddd; padding: 8px;">Wind Energy (50m)</th>
-                    <th style="border: 1px solid #ddd; padding: 8px;">GHI</th>
-                    <th style="border: 1px solid #ddd; padding: 8px;">DNI</th>
-                </tr>
+              <tr style="background-color: #f2f2f2;">
+                <th style="border: 1px solid #ddd; padding: 8px;">Year</th>
+                <th style="border: 1px solid #ddd; padding: 8px;">Wind Energy (10m)</th>
+                <th style="border: 1px solid #ddd; padding: 8px;">Wind Energy (50m)</th>
+                <th style="border: 1px solid #ddd; padding: 8px;">GHI</th>
+                <th style="border: 1px solid #ddd; padding: 8px;">DNI</th>
+              </tr>
             </thead>
             <tbody>
-    `;
+        `;
 
         windData.forEach((item, index) => {
             const solar = solarData[index];
             tableHtml += `
-            <tr>
+              <tr>
                 <td style="border: 1px solid #ddd; padding: 8px;">${item.year}</td>
-                <td style="border: 1px solid #ddd; padding: 8px;">${item.wind_energy_10m.toFixed(2)} kWh/m²</td>
-                <td style="border: 1px solid #ddd; padding: 8px;">${item.wind_energy_50m.toFixed(2)} kWh/m²</td>
-                <td style="border: 1px solid #ddd; padding: 8px;">${solar.ghi.toFixed(2)} kWh/m²</td>
-                <td style="border: 1px solid #ddd; padding: 8px;">${solar.dni.toFixed(2)} kWh/m²</td>
-            </tr>
-        `;
+                <td style="border: 1px solid #ddd; padding: 8px;">${item.wind_energy_10m.toFixed(2)}</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">${item.wind_energy_50m.toFixed(2)}</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">${solar.ghi.toFixed(2)}</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">${solar.dni.toFixed(2)}</td>
+              </tr>
+            `;
         });
+
+        // 2-year average + total average
+        const totalAvg = (
+            parseFloat(avgWind10m) +
+            parseFloat(avgWind50m) +
+            parseFloat(avgGHI) +
+            parseFloat(avgDNI)
+        ) / 4;
 
         tableHtml += `
             <tr style="font-weight: bold;">
-                <td style="border: 1px solid #ddd; padding: 8px;">2-Year Avg</td>
-                <td style="border: 1px solid #ddd; padding: 8px;">${avgWind10m} kWh/m²</td>
-                <td style="border: 1px solid #ddd; padding: 8px;">${avgWind50m} kWh/m²</td>
-                <td style="border: 1px solid #ddd; padding: 8px;">${avgGHI} kWh/m²</td>
-                <td style="border: 1px solid #ddd; padding: 8px;">${avgDNI} kWh/m²</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">2-Year Avg</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">${avgWind10m}</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">${avgWind50m}</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">${avgGHI}</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">${avgDNI}</td>
             </tr>
             <tr style="font-weight: bold;">
-                <td style="border: 1px solid #ddd; padding: 8px;">Total Average</td>
-                <td style="border: 1px solid #ddd; padding: 8px;" colspan="4">${totalAvg.toFixed(2)} kWh/m²</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">Total Average</td>
+              <td style="border: 1px solid #ddd; padding: 8px;" colspan="4">${totalAvg.toFixed(2)}</td>
             </tr>
-            </tbody>
+          </tbody>
         </table>
-    `;
+        `;
 
-
-        // Update the popup with the table
         dataPopup.setContent(`
-        <h4>Data for (${lat.toFixed(5)}, ${lon.toFixed(5)})</h4>
-        ${tableHtml}
-    `);
+          <h4>Data for (${lat.toFixed(5)}, ${lon.toFixed(5)})</h4>
+          ${tableHtml}
+        `);
     }
 
-    /**
-     * Displays an error message in a popup.
-     * @param {number} lat - Latitude of the point.
-     * @param {number} lon - Longitude of the point.
-     * @param {string} errorMsg - The error message to display.
-     */
     function displayErrorPopup(lat, lon, errorMsg) {
-        // Create a popup with the error message
-        const errorPopup = L.popup({ maxWidth: 600 })
+        L.popup({ maxWidth: 600 })
             .setLatLng([lat, lon])
-            .setContent(`<p>Error fetching data for (${lat.toFixed(5)}, ${lon.toFixed(5)}): ${errorMsg}</p>`)
+            .setContent(
+                `<p>Error fetching data for (${lat.toFixed(5)}, ${lon.toFixed(5)}): ${errorMsg}</p>`
+            )
             .openOn(map);
     }
 
-    /**
-     * Toggles the display of filtered points based on the checkbox state.
-     */
+    // ----------------------------------
+    // 12) "FILTERED POINTS" LOGIC
+    // ----------------------------------
     function toggleFilteredPoints() {
         console.log("Filtered Points checkbox state changed.");
         if (checkboxFiltered.checked) {
-            // Add green circles for points with totAvg > averageTotAvg
             addFilteredMarkers();
         } else {
-            // Remove all filtered markers
             removeFilteredMarkers();
         }
     }
 
-    /**
-     * Adds green circle overlays for points with totAvg greater than averageTotAvg.
-     */
     function addFilteredMarkers() {
-        console.log("Adding filtered markers.");
         dynamicMarkers.forEach(marker => {
             const { lat, lng } = marker.getLatLng();
             const cacheKey = `${lat.toFixed(5)},${lng.toFixed(5)}`;
-            if (dataCache.has(cacheKey)) {
-                const cachedEntry = dataCache.get(cacheKey);
-                if (cachedEntry.status === 'fulfilled') {
-                    const totAvg = cachedEntry.value.totAvg;
-                    if (totAvg > averageTotAvg) {
-                        // Add green circle
-                        const greenCircle = L.circle([lat, lng], {
-                            color: 'green',
-                            fillColor: 'green',
-                            fillOpacity: 0.3,
-                            radius: 20 // Adjust radius as needed
-                        }).addTo(map)
-                            .bindPopup(`Filtered Point: (${lat.toFixed(5)}, ${lng.toFixed(5)})<br>totAvg: ${totAvg.toFixed(2)}`);
-                        filteredMarkers.push(greenCircle);
-                        console.log(`Added green circle for point (${lat}, ${lng}) with totAvg ${totAvg}`);
-                    }
+            if (!dataCache.has(cacheKey)) return;
+
+            const entry = dataCache.get(cacheKey);
+            if (entry.status === 'fulfilled') {
+                const totAvg = entry.value.totAvg;
+                if (totAvg > averageTotAvg) {
+                    // a bigger green circle
+                    const greenCircle = L.circle([lat, lng], {
+                        color: 'green',
+                        fillColor: 'green',
+                        fillOpacity: 0.3,
+                        radius: 200
+                    })
+                        .addTo(map)
+                        .bindPopup(
+                            `Filtered Point: (${lat.toFixed(5)}, ${lng.toFixed(5)})<br>totAvg: ${totAvg.toFixed(
+                                2
+                            )}`
+                        );
+                    filteredMarkers.push(greenCircle);
                 }
             }
         });
     }
 
-    /**
-     * Removes all green circle overlays for filtered points.
-     */
     function removeFilteredMarkers() {
-        console.log("Removing filtered markers.");
-        filteredMarkers.forEach(marker => map.removeLayer(marker));
+        filteredMarkers.forEach(m => map.removeLayer(m));
         filteredMarkers = [];
     }
 
-    /**
-     * Evaluates a single point's totAvg and adds a green circle if it exceeds the average.
-     * @param {number} lat - Latitude of the point.
-     * @param {number} lon - Longitude of the point.
-     * @param {number} totAvg - totAvg of the point.
-     */
     function evaluateAndAddFilteredMarker(lat, lon, totAvg) {
         if (totAvg >= averageTotAvg) {
             const greenCircle = L.circle([lat, lon], {
                 color: 'green',
                 fillColor: 'green',
                 fillOpacity: 0.3,
-                radius: 20 // Adjust radius as needed
-            }).addTo(map)
-                .bindPopup(`Filtered Point: (${lat.toFixed(5)}, ${lon.toFixed(5)})<br>totAvg: ${totAvg.toFixed(2)}`);
+                radius: 20
+            })
+                .addTo(map)
+                .bindPopup(
+                    `Filtered Point: (${lat.toFixed(5)}, ${lon.toFixed(5)})<br>totAvg: ${totAvg.toFixed(2)}`
+                );
             filteredMarkers.push(greenCircle);
-            console.log(`Added green circle for point (${lat}, ${lon}) with totAvg ${totAvg}`);
         }
     }
 
-    /**
-     * Updates dynamic points based on the Initial Points checkbox state.
-     */
+    // ----------------------------------
+    // 13) CONVEX HULL LOGIC (BLUE vs. RED)
+    // ----------------------------------
+    function toggleHullPolygons() {
+        if (!hullCheckbox.checked) {
+            // remove hull layers if present
+            if (blueHullLayer) {
+                map.removeLayer(blueHullLayer);
+                blueHullLayer = null;
+            }
+            if (redHullLayer) {
+                map.removeLayer(redHullLayer);
+                redHullLayer = null;
+            }
+            return;
+        }
+
+        // Gather points for each set
+        const bluePoints = [];
+        const redPoints = [];
+
+        // We'll classify them by "entry.value.normalized == 0 => blue, 1 => red"
+        dynamicMarkers.forEach(marker => {
+            const { lat, lng } = marker.getLatLng();
+            const cacheKey = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+            if (dataCache.has(cacheKey)) {
+                const entry = dataCache.get(cacheKey);
+                if (entry.status === 'fulfilled') {
+                    const val = entry.value.normalized; // Adjust if your data uses a different property
+                    if (val === 0) {
+                        // Blue group
+                        bluePoints.push([lng, lat]); // note [lng, lat] for turf
+                    } else if (val === 1) {
+                        // Red group
+                        redPoints.push([lng, lat]);
+                    }
+                }
+            }
+        });
+
+        // Compute hull for each group
+        const blueHull = computeHull(bluePoints);
+        const redHull = computeHull(redPoints);
+
+        // Remove existing hull layers so we don't stack them up
+        if (blueHullLayer) {
+            map.removeLayer(blueHullLayer);
+            blueHullLayer = null;
+        }
+        if (redHullLayer) {
+            map.removeLayer(redHullLayer);
+            redHullLayer = null;
+        }
+
+        // Add them to the map
+        if (blueHull) {
+            blueHullLayer = L.geoJSON(blueHull, {
+                style: {
+                    color: 'blue',
+                    fillColor: 'blue',
+                    fillOpacity: 0.2
+                }
+            }).addTo(map);
+        }
+
+        if (redHull) {
+            redHullLayer = L.geoJSON(redHull, {
+                style: {
+                    color: 'red',
+                    fillColor: 'red',
+                    fillOpacity: 0.2
+                }
+            }).addTo(map);
+        }
+    }
+
+    // Helper to do the turf convex
+    function computeHull(coordsArray) {
+        if (!coordsArray || coordsArray.length < 3) {
+            return null; // can't form polygon with < 3 points
+        }
+        // Convert to a FeatureCollection of points
+        const pointsFC = turf.featureCollection(
+            coordsArray.map(c => turf.point(c))
+        );
+        // Let turf compute the convex polygon
+        return turf.convex(pointsFC);
+    }
+
+    // ----------------------------------
+    // 14) SHOW / HIDE DYNAMIC POINTS
+    // ----------------------------------
     function updateDynamicPoints() {
         console.log("Initial Points checkbox state changed.");
         if (checkboxInitial.checked) {
             if (lastSearchedLat && lastSearchedLon && circle) {
-                var radiusKm = parseInt(radiusInput.value);
+                var radiusKm = parseInt(radiusInput.value) || 0;
                 generateDynamicPoints(lastSearchedLat, lastSearchedLon, radiusKm);
             }
         } else {
-            // Remove dynamic markers and filtered markers if Initial Points checkbox is unchecked
-            console.log("Removing dynamic markers as Initial Points checkbox is unchecked.");
-            dynamicMarkers.forEach(marker => map.removeLayer(marker));
+            // Remove dynamic & filtered markers
+            dynamicMarkers.forEach(m => map.removeLayer(m));
             dynamicMarkers = [];
-
-            // Also remove filtered markers
             removeFilteredMarkers();
+
+            // Remove hull polygons
+            if (blueHullLayer) {
+                map.removeLayer(blueHullLayer);
+                blueHullLayer = null;
+            }
+            if (redHullLayer) {
+                map.removeLayer(redHullLayer);
+                redHullLayer = null;
+            }
         }
     }
 });
